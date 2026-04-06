@@ -26,13 +26,6 @@
       "css": ["content.css"],
       "run_at": "document_idle",
       "all_frames": false
-    },
-    {
-      "matches": ["chrome-extension://*/pdf-viewer.html*"],
-      "js": ["content.js"],
-      "css": ["content.css"],
-      "run_at": "document_idle",
-      "all_frames": false
     }
   ],
   "permissions": ["activeTab", "scripting", "storage", "notifications"],
