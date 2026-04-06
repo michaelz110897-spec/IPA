@@ -35,7 +35,7 @@
       "all_frames": false
     }
   ],
-  "permissions": ["activeTab", "scripting", "storage"],
+  "permissions": ["activeTab", "scripting", "storage", "notifications"],
   "host_permissions": ["<all_urls>"],
   "web_accessible_resources": [
     {

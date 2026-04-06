@@ -47,6 +47,25 @@ when you click the toolbar icon on a PDF tab.
 - After redirection, each page is rendered with a selectable text layer that
   the scanner reads from as you move your cursor.
 
+## Known limitations
+
+### Adobe Acrobat browser extension
+If you have the **Adobe Acrobat: PDF edit, convert, sign tools** Chrome
+extension installed, it intercepts PDF navigations and renders them inside
+its own extension pages. Chrome forbids any other extension from injecting
+into Adobe's viewer, so the scanner cannot read that content directly.
+
+The extension will try a best-effort recovery: if Adobe exposes the original
+PDF URL in its viewer's query string, clicking the toolbar icon will redirect
+the tab to the bundled PDF.js viewer and scanning will work normally. When
+Adobe hides the URL (e.g. it loads the PDF from `acrobat.adobe.com`), you will
+see a notification explaining the limitation.
+
+**Workaround**: disable the Adobe Acrobat extension on the page you want to
+scan, or turn off its "Open in Acrobat" / default-PDF-handler setting, then
+reload. The PDF will then open in Chrome's built-in viewer and the scanner
+will redirect it to the bundled PDF.js viewer automatically.
+
 ## Files
 
 - `manifest.json` — MV3 manifest

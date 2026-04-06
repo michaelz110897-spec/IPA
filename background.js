@@ -2,16 +2,54 @@
 const activeTabs = new Set();
 
 const NATIVE_PDF_VIEWER_PREFIX = "chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/";
+const ADOBE_PDF_VIEWER_PREFIX = "chrome-extension://efaidnbmnnnibpcajpcglclefindmkaj/";
+const ADOBE_URL_PARAM_NAMES = ["pdfurl", "originalurl", "original-url", "url", "file", "src"];
 
 function isPdfUrl(url) {
   if (!url) return false;
   if (url.startsWith(NATIVE_PDF_VIEWER_PREFIX)) return true;
+  if (url.startsWith(ADOBE_PDF_VIEWER_PREFIX)) return true;
   try {
     const u = new URL(url);
     return /\.pdf$/i.test(u.pathname);
   } catch {
     return false;
   }
+}
+
+// Best-effort extraction of the original PDF URL from an Adobe Acrobat
+// browser-extension viewer URL. Adobe's viewer format is undocumented and
+// varies between versions — try several common query parameter names.
+function extractAdobeOriginalUrl(adobeUrl) {
+  try {
+    const u = new URL(adobeUrl);
+    for (const name of ADOBE_URL_PARAM_NAMES) {
+      const v = u.searchParams.get(name);
+      if (v && /^https?:\/\//i.test(v)) return v;
+    }
+    // Some versions store the URL in the hash fragment.
+    if (u.hash) {
+      const hashParams = new URLSearchParams(u.hash.replace(/^#/, ""));
+      for (const name of ADOBE_URL_PARAM_NAMES) {
+        const v = hashParams.get(name);
+        if (v && /^https?:\/\//i.test(v)) return v;
+      }
+    }
+  } catch {}
+  return null;
+}
+
+function notifyAdobeUnsupported() {
+  try {
+    chrome.notifications.create({
+      type: "basic",
+      iconUrl: chrome.runtime.getURL("icons/icon128.png"),
+      title: "Price Scanner",
+      message:
+        "This PDF is being displayed by the Adobe Acrobat browser extension, which blocks scanning. " +
+        "Disable the Adobe extension (or its 'Open in Acrobat' setting) on this page and reload.",
+    });
+  } catch {}
 }
 
 function viewerUrlFor(originalUrl) {
@@ -33,11 +71,21 @@ function waitForTabComplete(tabId) {
 chrome.action.onClicked.addListener(async (tab) => {
   if (!tab || tab.id == null) return;
 
-  // If the tab points at a PDF (native viewer or raw .pdf URL) and we're not
-  // already on our own viewer, redirect first.
+  // If the tab points at a PDF (native viewer, Adobe viewer, or raw .pdf URL)
+  // and we're not already on our own viewer, redirect first.
   const onOwnViewer = tab.url && tab.url.startsWith(chrome.runtime.getURL("pdf-viewer.html"));
   if (!onOwnViewer && isPdfUrl(tab.url)) {
-    const target = viewerUrlFor(tab.url);
+    let sourceUrl = tab.url;
+    if (tab.url.startsWith(ADOBE_PDF_VIEWER_PREFIX)) {
+      const recovered = extractAdobeOriginalUrl(tab.url);
+      if (!recovered) {
+        // Adobe hid the original URL — we can't render it ourselves.
+        notifyAdobeUnsupported();
+        return;
+      }
+      sourceUrl = recovered;
+    }
+    const target = viewerUrlFor(sourceUrl);
     const done = waitForTabComplete(tab.id);
     await chrome.tabs.update(tab.id, { url: target });
     await done;
