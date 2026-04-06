@@ -1,7 +1,7 @@
 .pce-rect {
   position: fixed;
   width: 100px;
-  height: 262px;
+  height: 162px;
   border: 2px dashed #e91e63;
   background: transparent;
   pointer-events: none;

@@ -3,7 +3,7 @@
   window.__pceInjected = true;
 
   const RECT_W = 100;
-  const RECT_H = 262;
+  const RECT_H = 162;
 
   // Price: a dollar amount NOT preceded by a letter (word char). Optional $.
   // Group 1 = the numeric value.

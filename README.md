@@ -1,6 +1,6 @@
 # Price Comparison Scanner
 
-A Chrome/Edge (Manifest V3) browser extension that draws a 100×262 px rectangle around your cursor and live-calculates the `%off` from a displayed price and `SAVE` amount inside that rectangle.
+A Chrome/Edge (Manifest V3) browser extension that draws a 100×162 px rectangle around your cursor and live-calculates the `%off` from a displayed price and `SAVE` amount inside that rectangle. Works on HTML pages and PDFs.
 
 ## How it works
 
@@ -34,10 +34,25 @@ Create a file `test.html` with:
 
 Open it, click the extension icon, and hover over the text. The label should read `16.67% off`.
 
+## PDF support
+
+The extension can also scan prices inside PDF documents. Because Chrome does
+not allow content scripts to inject into the built-in PDF viewer, the extension
+ships its own viewer (built on Mozilla PDF.js) and automatically switches to it
+when you click the toolbar icon on a PDF tab.
+
+- Remote (http/https) PDFs work out of the box.
+- For local `file://` PDFs, enable **Allow access to file URLs** for the
+  extension at `chrome://extensions` → Details.
+- After redirection, each page is rendered with a selectable text layer that
+  the scanner reads from as you move your cursor.
+
 ## Files
 
 - `manifest.json` — MV3 manifest
-- `background.js` — toggles activation per tab on icon click
+- `background.js` — toggles activation per tab on icon click; redirects PDFs to the bundled viewer
 - `content.js` — overlay, cursor tracking, text scanning, price/save detection
 - `content.css` — overlay + label styles
+- `pdf-viewer.html` / `pdf-viewer.js` — PDF.js-based viewer with a text layer
+- `vendor/pdfjs/` — vendored PDF.js build (legacy ESM)
 - `icons/` — toolbar icons
