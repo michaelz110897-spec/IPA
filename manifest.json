@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "Price Comparison Scanner",
+  "version": "0.1.0",
+  "description": "Scan a rectangular area around the cursor for a price and a SAVE amount, and display the calculated %off live.",
+  "action": {
+    "default_title": "Toggle Price Scanner",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "css": ["content.css"],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
+  "permissions": ["activeTab", "scripting", "storage"]
+}
