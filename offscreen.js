@@ -43,48 +43,46 @@ async function cropToCanvas(bitmap, rect, dpr) {
 }
 
 // Prepares a crop for OCR:
-//   1. Upscale 3x (Tesseract accuracy rises sharply once cap-height >= 30 px).
+//   1. Optional 3x upscale for small crops (Tesseract accuracy rises sharply
+//      once cap-height >= 30 px). Skipped for full-viewport scans -- upscaling
+//      a 1920x1080 capture to ~5760x3240 would blow memory and take 30+ s.
 //   2. Grayscale via luminance.
-//   3. If the mean is dark, invert so text becomes dark-on-light -- Otsu
-//      thresholding inside Tesseract works much better that way. This is the
-//      common case on retail stickers (red/yellow backgrounds, white text).
-//   4. Stretch contrast to [0,255].
-function preprocess(srcCanvas) {
-  const scale = 3;
+//   3. Contrast stretch to [0,255].
+// Auto-invert is intentionally NOT done here: on a whole-viewport image the
+// mean luminance is dominated by light background, so a global invert either
+// never fires or fires on the wrong region. Tesseract's per-region adaptive
+// thresholding (PSM 11) handles mixed-contrast pages itself.
+function preprocess(srcCanvas, upscale) {
+  const scale = upscale ? 3 : 1;
   const w = srcCanvas.width * scale;
   const h = srcCanvas.height * scale;
   const out = new OffscreenCanvas(w, h);
   const ctx = out.getContext("2d", { willReadFrequently: true });
-  ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = "high";
+  if (upscale) {
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+  }
   ctx.drawImage(srcCanvas, 0, 0, w, h);
 
   const img = ctx.getImageData(0, 0, w, h);
   const data = img.data;
   const n = data.length;
 
-  // Pass 1: grayscale + track mean/min/max.
-  let sum = 0;
+  // Pass 1: grayscale + track min/max for contrast stretch.
   let min = 255;
   let max = 0;
   for (let i = 0; i < n; i += 4) {
     const g = (data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114) | 0;
     data[i] = data[i + 1] = data[i + 2] = g;
-    sum += g;
     if (g < min) min = g;
     if (g > max) max = g;
   }
-  const mean = sum / (n / 4);
-  const invert = mean < 128;
 
-  // Pass 2: optional invert + contrast stretch to [0,255].
-  let lo = invert ? 255 - max : min;
-  let hi = invert ? 255 - min : max;
-  const range = Math.max(1, hi - lo);
+  // Pass 2: contrast stretch to [0,255].
+  const range = Math.max(1, max - min);
   for (let i = 0; i < n; i += 4) {
     let g = data[i];
-    if (invert) g = 255 - g;
-    g = ((g - lo) * 255 / range) | 0;
+    g = ((g - min) * 255 / range) | 0;
     if (g < 0) g = 0;
     else if (g > 255) g = 255;
     data[i] = data[i + 1] = data[i + 2] = g;
@@ -113,11 +111,11 @@ function flattenWords(data) {
   return out;
 }
 
-async function runOcr(dataUrl, rect, dpr) {
+async function runOcr(dataUrl, rect, dpr, fullViewport) {
   const worker = await getWorker();
   const bitmap = await dataUrlToBitmap(dataUrl);
   const cropped = await cropToCanvas(bitmap, rect, dpr);
-  const prepped = preprocess(cropped);
+  const prepped = preprocess(cropped, !fullViewport);
   const result = await worker.recognize(prepped, {}, { blocks: true });
   bitmap.close && bitmap.close();
   return flattenWords(result.data);
@@ -125,7 +123,7 @@ async function runOcr(dataUrl, rect, dpr) {
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (!msg || msg.target !== "offscreen" || msg.type !== "pce-ocr") return;
-  runOcr(msg.dataUrl, msg.rect, msg.dpr || 1)
+  runOcr(msg.dataUrl, msg.rect, msg.dpr || 1, !!msg.fullViewport)
     .then((words) => sendResponse({ ok: true, words }))
     .catch((err) => sendResponse({ ok: false, error: String(err && err.message || err) }));
   return true;

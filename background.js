@@ -42,7 +42,7 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   activeTabs.delete(tabId);
 });
 
-// Content script asks us to OCR the visible region under its rectangle.
+// Content script asks us to OCR the visible viewport.
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (!msg || msg.type !== "pce-scan") return;
   (async () => {
@@ -60,6 +60,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         dataUrl,
         rect: msg.rect,
         dpr: msg.dpr,
+        fullViewport: !!msg.fullViewport,
       });
       sendResponse(reply || { ok: false, error: "no reply" });
     } catch (err) {

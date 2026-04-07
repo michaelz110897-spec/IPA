@@ -2,90 +2,106 @@
   if (window.__pceInjected) return;
   window.__pceInjected = true;
 
-  const RECT_W = 150;
-  const RECT_H = 160;
-  const SETTLE_MS = 250;
+  // State machine: idle -> scanning -> showing -> idle.
+  let state = "idle";
+  let layerEl = null;
+  let toastEl = null;
+  // Bumped on every teardown so in-flight scans can detect they've been
+  // cancelled by a second icon click before their OCR reply arrives.
+  let scanGen = 0;
 
-  let active = false;
-  let rectEl = null;
-  let labelEl = null;
-  let mouseX = 0;
-  let mouseY = 0;
-  let rafPending = false;
-  let settleTimer = null;
-  let scanInFlight = false;
-  let lastScannedAt = 0;
-  let lastResultText = "";
+  // ---------- message entry point ----------
 
-  function createOverlay() {
-    rectEl = document.createElement("div");
-    rectEl.className = "pce-rect";
-    labelEl = document.createElement("div");
-    labelEl.className = "pce-label";
-    labelEl.style.display = "none";
-    rectEl.appendChild(labelEl);
-    document.documentElement.appendChild(rectEl);
-  }
-
-  function destroyOverlay() {
-    if (rectEl && rectEl.parentNode) rectEl.parentNode.removeChild(rectEl);
-    rectEl = null;
-    labelEl = null;
-  }
-
-  function onMouseMove(e) {
-    mouseX = e.clientX;
-    mouseY = e.clientY;
-    if (!rafPending) {
-      rafPending = true;
-      requestAnimationFrame(positionRect);
+  chrome.runtime.onMessage.addListener((msg) => {
+    if (!msg || msg.type !== "pce-toggle") return;
+    if (msg.active) {
+      if (state === "idle") runViewportScan();
+      // If a scan is already in flight or highlights are showing, the user
+      // expects a second click to clear; background toggles `active` on every
+      // click so a "false" will follow for teardown.
+    } else {
+      scanGen++;
+      clearHighlights();
+      clearToast();
+      state = "idle";
     }
-    scheduleScan();
-  }
+  });
 
-  function positionRect() {
-    rafPending = false;
-    if (!active || !rectEl) return;
-    rectEl.style.left = (mouseX - RECT_W / 2) + "px";
-    rectEl.style.top = (mouseY - RECT_H / 2) + "px";
-  }
+  // ---------- top-level scan flow ----------
 
-  function scheduleScan() {
-    if (settleTimer) clearTimeout(settleTimer);
-    settleTimer = setTimeout(triggerScan, SETTLE_MS);
-  }
+  async function runViewportScan() {
+    state = "scanning";
+    const myGen = ++scanGen;
+    clearHighlights();
+    showToast("Scanning page\u2026", "info");
 
-  function currentRect() {
-    const left = Math.max(0, mouseX - RECT_W / 2);
-    const top = Math.max(0, mouseY - RECT_H / 2);
-    return { x: left, y: top, w: RECT_W, h: RECT_H };
-  }
-
-  async function triggerScan() {
-    if (!active || scanInFlight) return;
-    scanInFlight = true;
-    const rect = currentRect();
+    const rect = {
+      x: 0,
+      y: 0,
+      w: Math.max(1, window.innerWidth),
+      h: Math.max(1, window.innerHeight),
+    };
     const dpr = window.devicePixelRatio || 1;
+    const scrollX = window.scrollX;
+    const scrollY = window.scrollY;
+
+    let reply;
     try {
-      const reply = await chrome.runtime.sendMessage({ type: "pce-scan", rect, dpr });
-      if (!reply || !reply.ok) return;
-      handleWords(reply.words || []);
+      reply = await chrome.runtime.sendMessage({
+        type: "pce-scan",
+        rect,
+        dpr,
+        fullViewport: true,
+      });
     } catch (e) {
-      // Background unreachable; ignore.
-    } finally {
-      scanInFlight = false;
-      lastScannedAt = Date.now();
+      if (myGen !== scanGen) return;
+      clearToast();
+      showToast("Scan failed", "error");
+      setTimeout(() => { if (myGen === scanGen) clearToast(); }, 2000);
+      state = "idle";
+      return;
     }
+
+    if (myGen !== scanGen) return; // cancelled by a second click
+    if (!reply || !reply.ok) {
+      clearToast();
+      showToast("Scan failed", "error");
+      setTimeout(() => { if (myGen === scanGen) clearToast(); }, 2000);
+      state = "idle";
+      return;
+    }
+
+    const rawWords = reply.words || [];
+    if (rawWords.length === 0) {
+      clearToast();
+      showToast("No text found", "info");
+      setTimeout(() => { if (myGen === scanGen) clearToast(); }, 2000);
+      state = "idle";
+      return;
+    }
+
+    const fused = fuseDollarCents(rawWords);
+    const words = tagWords(fused);
+    const clusters = clusterWords(words);
+
+    if (myGen !== scanGen) return;
+    clearToast();
+    if (!clusters.length) {
+      showToast("No prices found", "info");
+      setTimeout(() => { if (myGen === scanGen) clearToast(); }, 2000);
+      state = "idle";
+      return;
+    }
+
+    renderHighlights(clusters, dpr, scrollX, scrollY);
+    state = "showing";
   }
 
-  // ---------- spatial parser ----------
+  // ---------- spatial parser (unchanged from Rev 5) ----------
   //
   // Operates over a spatial word graph of the OCR output. Each word is tagged
   // with a semantic role (price-prefix / price-suppress / save-marker / noise /
-  // numeric / word) and then scored geometrically. Handles the real retail
-  // sticker conventions: big-dollar + superscript-cents split, prefix flags
-  // like FROM / NOW, unit suffixes like `ea`, and SAVE bands with filler
-  // words (`UP TO`, `OFF`, `YOU`).
+  // numeric / word) and then scored geometrically.
 
   const FULL_PRICE_RE = /^\$?\d{1,3}(?:,\d{3})*\.\d{2}$/;
   const DOLLAR_RE = /^\$?\d{1,4}$/;          // e.g. "$11", "8", "$15"
@@ -104,7 +120,7 @@
   ]);
   const NOISE_WORDS = new Set([
     "ea", "ea.", "each", "lb", "lb.", "kg", "pk", "ct", "oz",
-    "*", "†", "/", "up", "to", "off", "you", "-", "—",
+    "*", "\u2020", "/", "up", "to", "off", "you", "-", "\u2014",
   ]);
 
   function bboxH(b) { return b.y1 - b.y0; }
@@ -127,15 +143,12 @@
   function cleanText(t) {
     return t.replace(/[:;,.\u00a0]+$/g, "").trim();
   }
-  function normLower(t) {
-    return cleanText(t).toLowerCase();
-  }
 
   function classify(text) {
     const raw = cleanText(text);
     const low = raw.toLowerCase();
     if (ANY_NUM_RE.test(raw)) return "numeric";
-    if (/^save$/i.test(low) || /save/i.test(low) && /\d/.test(raw)) return "save-marker";
+    if (/^save$/i.test(low) || (/save/i.test(low) && /\d/.test(raw))) return "save-marker";
     if (PRICE_PREFIX_WORDS.has(low)) return "price-prefix";
     if (PRICE_SUPPRESS_WORDS.has(low)) return "price-suppress";
     if (NOISE_WORDS.has(low)) return "noise";
@@ -153,14 +166,10 @@
 
   // Fuse big-dollar + small-cents splits, e.g. ("$11" big) + ("99" small) ->
   // synthetic word "$11.99" with the dollar's bbox unioned with the cents box.
-  // Geometric rule, not textual: cents must be adjacent right, smaller,
-  // and in superscript position relative to the dollar word.
   function fuseDollarCents(words) {
     const consumed = new Set();
     const extras = [];
 
-    // Skip fusion for words that already look like a complete price ($X.YY):
-    // those are their own fused token.
     const dollarCandidates = words.filter((w) => {
       const t = cleanText(w.text);
       return DOLLAR_RE.test(t) && !FULL_PRICE_RE.test(t);
@@ -177,12 +186,10 @@
       for (const c of centsCandidates) {
         if (consumed.has(c) || c === d) continue;
         const ch = bboxH(c.bbox);
-        if (ch <= 0 || ch > dh * 0.85) continue; // cents noticeably smaller
+        if (ch <= 0 || ch > dh * 0.85) continue;
         const gap = c.bbox.x0 - d.bbox.x1;
-        if (gap < -dw * 0.2 || gap > dw * 1.5) continue; // adjacent-right
-        // cents top must sit near or above dollar top (superscript)
+        if (gap < -dw * 0.2 || gap > dw * 1.5) continue;
         if (c.bbox.y0 > d.bbox.y0 + dh * 0.35) continue;
-        // and must overlap the dollar's vertical band at all
         if (c.bbox.y1 < d.bbox.y0 + dh * 0.05) continue;
         const score = Math.abs(gap) + Math.abs(c.bbox.y0 - d.bbox.y0);
         if (score < bestScore) {
@@ -219,7 +226,6 @@
     return words.map((w) => ({ ...w, role: classify(w.text) }));
   }
 
-  // Non-noise words on the same visual line, sorted left-to-right.
   function lineNeighborsLeftOf(target, words) {
     const out = [];
     for (const w of words) {
@@ -229,74 +235,20 @@
       if (w.bbox.x1 > target.bbox.x0) continue;
       out.push(w);
     }
-    out.sort((a, b) => b.bbox.x1 - a.bbox.x1); // closest first
+    out.sort((a, b) => b.bbox.x1 - a.bbox.x1);
     return out;
   }
 
-  function findSaveAmount(words) {
-    const numerics = words.filter((w) => w.role === "numeric");
-    const markers = words.filter((w) => w.role === "save-marker");
-    for (const sw of markers) {
-      const rawNoDollar = cleanText(sw.text).replace(/^\$/, "");
-      // SAVE token glued to digits (e.g. "SAVE$3.96").
-      if (/\d/.test(rawNoDollar)) {
-        const v = parseAmount(sw.text);
-        if (v != null) return { value: v, source: sw, inline: true };
-      }
-      const slop = bboxH(sw.bbox) * 0.25;
-      const saveLeft = sw.bbox.x0 - slop;
-
-      // Candidate numerics: within 2 lines of SAVE, at or right of SAVE's
-      // left edge, and at most 4 non-noise words away when walking in reading
-      // order.
-      const candidates = [];
-      for (const cand of numerics) {
-        if (Math.abs(cand.lineId - sw.lineId) > 2) continue;
-        if (cand.bbox.x0 < saveLeft) continue;
-        // word-index walk: count non-noise words strictly between sw and cand
-        // on the same line(s). Use spatial cursor: any non-noise word whose
-        // center is between sw and cand (in reading order) counts.
-        let between = 0;
-        for (const w of words) {
-          if (w === sw || w === cand) continue;
-          if (w.role === "noise") continue;
-          if (Math.abs(w.lineId - sw.lineId) > 2) continue;
-          const cxW = bboxCenterX(w.bbox);
-          const cyW = bboxCenterY(w.bbox);
-          const afterSave =
-            w.lineId > sw.lineId ||
-            (w.lineId === sw.lineId && cxW > bboxCenterX(sw.bbox));
-          const beforeCand =
-            w.lineId < cand.lineId ||
-            (w.lineId === cand.lineId && cxW < bboxCenterX(cand.bbox));
-          if (afterSave && beforeCand) between++;
-        }
-        if (between > 4) continue;
-        const dx = bboxCenterX(cand.bbox) - bboxCenterX(sw.bbox);
-        const dy = bboxCenterY(cand.bbox) - bboxCenterY(sw.bbox);
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        candidates.push({ cand, dist });
-      }
-      candidates.sort((a, b) => a.dist - b.dist);
-      for (const { cand } of candidates) {
-        const v = parseAmount(cand.text);
-        if (v != null) return { value: v, source: sw, numeric: cand };
-      }
-    }
-    return null;
-  }
-
-  function findPrice(words, saveInfo) {
-    const skip = saveInfo && saveInfo.numeric;
+  // Rev-5 findPrice, refactored to accept an optional filter so clustering
+  // can restrict candidates to a spatial neighborhood.
+  function findPriceCandidates(words, filter) {
     const candidates = [];
     for (const w of words) {
-      if (w === skip) continue;
       if (w.role !== "numeric") continue;
+      if (filter && !filter(w)) continue;
       const v = parseAmount(w.text);
       if (v == null) continue;
 
-      // Suppress if a price-suppress word is immediately to the left on the
-      // same line (skipping noise words).
       const leftNeighbors = lineNeighborsLeftOf(w, words);
       let suppressed = false;
       let prefixed = false;
@@ -316,66 +268,260 @@
       if (hasDollar) score += 2;
       score += bboxH(w.bbox) / 10;
       if (w.merged) score += 1;
-      candidates.push({ value: v, score, height: bboxH(w.bbox), x0: w.bbox.x0 });
+      candidates.push({ word: w, value: v, score });
     }
-    if (!candidates.length) return null;
     candidates.sort((a, b) => {
       if (b.score !== a.score) return b.score - a.score;
-      if (b.height !== a.height) return b.height - a.height;
-      return a.x0 - b.x0;
+      const dh = bboxH(b.word.bbox) - bboxH(a.word.bbox);
+      if (dh !== 0) return dh;
+      return a.word.bbox.x0 - b.word.bbox.x0;
     });
-    return candidates[0].value;
+    return candidates;
   }
+
+  // ---------- per-sticker clustering ----------
+  //
+  // Seeds a cluster from each SAVE marker, finds the best nearby price, then
+  // sweeps orphan prices into price-only clusters.
+
+  function clusterWords(words) {
+    const clusters = [];
+    const claimedPrices = new Set();
+    const claimedSaveNumerics = new Set();
+
+    const markers = words.filter((w) => w.role === "save-marker");
+
+    for (const sw of markers) {
+      // SAVE amount: either glued to the marker ("SAVE$3.96"), or the nearest
+      // numeric in a local neighborhood.
+      let saveValue = null;
+      let saveBox = sw.bbox;
+      let saveNumeric = null;
+
+      const rawNoDollar = cleanText(sw.text).replace(/^\$/, "");
+      if (/\d/.test(rawNoDollar)) {
+        const v = parseAmount(sw.text);
+        if (v != null) {
+          saveValue = v;
+          saveBox = sw.bbox;
+        }
+      }
+
+      if (saveValue == null) {
+        const sh = bboxH(sw.bbox);
+        const scx = bboxCenterX(sw.bbox);
+        const best = findNearestNumeric(words, sw, {
+          yMin: sw.bbox.y0 - sh * 1.5,
+          yMax: sw.bbox.y1 + sh * 2.5,
+          xCenter: scx,
+          xHalfWidth: Math.max(bboxW(sw.bbox) * 2, sh * 6),
+          excludeRoles: new Set(["save-marker"]),
+          excludeSet: claimedSaveNumerics,
+        });
+        if (best) {
+          const v = parseAmount(best.text);
+          if (v != null) {
+            saveValue = v;
+            saveBox = best.bbox;
+            saveNumeric = best;
+          }
+        }
+      }
+
+      // Local price neighborhood: vertically above (mostly) and horizontally
+      // near the SAVE marker's column.
+      const sh = bboxH(sw.bbox);
+      const scx = bboxCenterX(sw.bbox);
+      const xHalf = Math.max(bboxW(sw.bbox), sh * 4);
+      const yMin = sw.bbox.y0 - sh * 5;
+      const yMax = sw.bbox.y1 + sh * 2;
+
+      const neighborhoodFilter = (w) => {
+        if (claimedPrices.has(w)) return false;
+        if (claimedSaveNumerics.has(w)) return false;
+        if (saveNumeric && w === saveNumeric) return false;
+        const cy = bboxCenterY(w.bbox);
+        if (cy < yMin || cy > yMax) return false;
+        const cx = bboxCenterX(w.bbox);
+        if (Math.abs(cx - scx) > xHalf) return false;
+        return true;
+      };
+
+      const priceCands = findPriceCandidates(words, neighborhoodFilter);
+      let priceWord = null;
+      let priceValue = null;
+      if (priceCands.length) {
+        priceWord = priceCands[0].word;
+        priceValue = priceCands[0].value;
+        claimedPrices.add(priceWord);
+      }
+
+      if (saveNumeric) claimedSaveNumerics.add(saveNumeric);
+
+      // A cluster needs at least a SAVE value or a price to be worth drawing.
+      if (saveValue == null && priceValue == null) continue;
+
+      const pct =
+        priceValue != null && saveValue != null && priceValue + saveValue > 0
+          ? (saveValue / (priceValue + saveValue)) * 100
+          : null;
+
+      clusters.push({
+        price: priceValue,
+        save: saveValue,
+        pct,
+        priceBox: priceWord ? priceWord.bbox : null,
+        saveBox,
+        saveMarker: sw,
+      });
+    }
+
+    // Orphan prices: any price candidate not already claimed by a SAVE cluster.
+    const orphanCands = findPriceCandidates(words, (w) => !claimedPrices.has(w));
+    for (const c of orphanCands) {
+      // Dedupe: skip if we already emitted this exact word.
+      if (claimedPrices.has(c.word)) continue;
+      claimedPrices.add(c.word);
+      clusters.push({
+        price: c.value,
+        save: null,
+        pct: null,
+        priceBox: c.word.bbox,
+        saveBox: null,
+        saveMarker: null,
+      });
+    }
+
+    // Dedupe SAVE clusters that ended up pointing at the same price: keep the
+    // one whose save marker is geometrically closest to the price.
+    const byPriceKey = new Map();
+    for (const cl of clusters) {
+      if (!cl.priceBox || !cl.saveMarker) continue;
+      const key = cl.priceBox.x0 + "|" + cl.priceBox.y0 + "|" + cl.priceBox.x1 + "|" + cl.priceBox.y1;
+      const prev = byPriceKey.get(key);
+      if (!prev) { byPriceKey.set(key, cl); continue; }
+      const distPrev = bboxDist(prev.saveMarker.bbox, prev.priceBox);
+      const distCurr = bboxDist(cl.saveMarker.bbox, cl.priceBox);
+      if (distCurr < distPrev) byPriceKey.set(key, cl);
+    }
+    const deduped = [];
+    const seenSaveClusters = new Set();
+    for (const cl of clusters) {
+      if (cl.priceBox && cl.saveMarker) {
+        const key = cl.priceBox.x0 + "|" + cl.priceBox.y0 + "|" + cl.priceBox.x1 + "|" + cl.priceBox.y1;
+        const winner = byPriceKey.get(key);
+        if (winner !== cl) continue;
+        if (seenSaveClusters.has(key)) continue;
+        seenSaveClusters.add(key);
+      }
+      deduped.push(cl);
+    }
+    return deduped;
+  }
+
+  function bboxDist(a, b) {
+    const dx = bboxCenterX(a) - bboxCenterX(b);
+    const dy = bboxCenterY(a) - bboxCenterY(b);
+    return Math.sqrt(dx * dx + dy * dy);
+  }
+
+  function findNearestNumeric(words, anchor, opts) {
+    let best = null;
+    let bestDist = Infinity;
+    const acx = bboxCenterX(anchor.bbox);
+    const acy = bboxCenterY(anchor.bbox);
+    for (const w of words) {
+      if (w === anchor) continue;
+      if (w.role !== "numeric") continue;
+      if (opts.excludeRoles && opts.excludeRoles.has(w.role)) continue;
+      if (opts.excludeSet && opts.excludeSet.has(w)) continue;
+      const cy = bboxCenterY(w.bbox);
+      if (cy < opts.yMin || cy > opts.yMax) continue;
+      const cx = bboxCenterX(w.bbox);
+      if (Math.abs(cx - opts.xCenter) > opts.xHalfWidth) continue;
+      const dx = cx - acx;
+      const dy = cy - acy;
+      const d = Math.sqrt(dx * dx + dy * dy);
+      if (d < bestDist) {
+        bestDist = d;
+        best = w;
+      }
+    }
+    return best;
+  }
+
+  // ---------- overlay rendering ----------
 
   function formatMoney(n) { return "$" + n.toFixed(2); }
 
-  function handleWords(rawWords) {
-    if (!labelEl) return;
-    const fused = fuseDollarCents(rawWords);
-    const words = tagWords(fused);
-    const saveInfo = findSaveAmount(words);
-    const save = saveInfo ? saveInfo.value : null;
-    const price = findPrice(words, saveInfo);
+  function renderHighlights(clusters, dpr, scrollX, scrollY) {
+    clearHighlights();
+    layerEl = document.createElement("div");
+    layerEl.className = "pce-layer";
+    document.body.appendChild(layerEl);
 
-    let text = "";
-    if (price != null && save != null && price + save > 0) {
-      const pct = (save / (price + save)) * 100;
-      text =
-        "Price: " + formatMoney(price) +
-        "  |  Save: " + formatMoney(save) +
-        "  |  " + pct.toFixed(2) + "% off";
-    } else if (price != null) {
-      text = "Price: " + formatMoney(price);
+    for (const cl of clusters) {
+      if (cl.priceBox) {
+        const el = document.createElement("div");
+        el.className = "pce-hl pce-hl-price";
+        setBoxStyle(el, cl.priceBox, dpr, scrollX, scrollY);
+        layerEl.appendChild(el);
+      }
+      if (cl.saveBox && cl.save != null) {
+        const el = document.createElement("div");
+        el.className = "pce-hl pce-hl-save";
+        setBoxStyle(el, cl.saveBox, dpr, scrollX, scrollY);
+        layerEl.appendChild(el);
+      }
+
+      // Label anchored above the price (or above the save box if no price).
+      const anchorBox = cl.priceBox || cl.saveBox;
+      if (!anchorBox) continue;
+      const label = document.createElement("div");
+      label.className = "pce-hl-label";
+      let text;
+      if (cl.price != null && cl.save != null && cl.pct != null) {
+        text = formatMoney(cl.price) + " \u00b7 save " + formatMoney(cl.save) + " \u00b7 " + cl.pct.toFixed(2) + "% off";
+      } else if (cl.price != null) {
+        text = formatMoney(cl.price);
+      } else {
+        text = "save " + formatMoney(cl.save);
+      }
+      label.textContent = text;
+      const cssX = bboxCenterX(anchorBox) / dpr + scrollX;
+      const cssY = anchorBox.y0 / dpr + scrollY;
+      label.style.left = cssX + "px";
+      label.style.top = (cssY - 4) + "px";
+      layerEl.appendChild(label);
     }
-
-    if (text) {
-      labelEl.textContent = text;
-      labelEl.style.display = "";
-      lastResultText = text;
-    } else {
-      labelEl.style.display = "none";
-      lastResultText = "";
-    }
   }
 
-  function activate() {
-    if (active) return;
-    active = true;
-    createOverlay();
-    window.addEventListener("mousemove", onMouseMove, true);
+  function setBoxStyle(el, bbox, dpr, scrollX, scrollY) {
+    const cssX = bbox.x0 / dpr + scrollX;
+    const cssY = bbox.y0 / dpr + scrollY;
+    const cssW = (bbox.x1 - bbox.x0) / dpr;
+    const cssH = (bbox.y1 - bbox.y0) / dpr;
+    el.style.left = cssX + "px";
+    el.style.top = cssY + "px";
+    el.style.width = cssW + "px";
+    el.style.height = cssH + "px";
   }
 
-  function deactivate() {
-    if (!active) return;
-    active = false;
-    window.removeEventListener("mousemove", onMouseMove, true);
-    if (settleTimer) { clearTimeout(settleTimer); settleTimer = null; }
-    destroyOverlay();
+  function clearHighlights() {
+    if (layerEl && layerEl.parentNode) layerEl.parentNode.removeChild(layerEl);
+    layerEl = null;
   }
 
-  chrome.runtime.onMessage.addListener((msg) => {
-    if (!msg || msg.type !== "pce-toggle") return;
-    if (msg.active) activate();
-    else deactivate();
-  });
+  function showToast(text, kind) {
+    clearToast();
+    toastEl = document.createElement("div");
+    toastEl.className = "pce-toast pce-toast-" + (kind || "info");
+    toastEl.textContent = text;
+    document.body.appendChild(toastEl);
+  }
+
+  function clearToast() {
+    if (toastEl && toastEl.parentNode) toastEl.parentNode.removeChild(toastEl);
+    toastEl = null;
+  }
 })();
