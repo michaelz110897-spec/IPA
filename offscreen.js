@@ -9,13 +9,16 @@ async function getWorker() {
     const base = chrome.runtime.getURL("vendor/tesseract/");
     const worker = await Tesseract.createWorker("eng", 1, {
       workerPath: base + "worker.min.js",
-      corePath: base, // tesseract.js will pick simd-lstm or lstm variant
+      corePath: base,
       langPath: base,
       cacheMethod: "none",
       gzip: true,
     });
     await worker.setParameters({
-      tessedit_pageseg_mode: "6", // assume a single uniform block of text
+      // PSM 11: sparse text, no layout assumption. Retail price stickers
+      // are multi-size, multi-line, and sparse; PSM 6 (uniform block)
+      // misreads them badly.
+      tessedit_pageseg_mode: "11",
     });
     return worker;
   })();
@@ -39,9 +42,61 @@ async function cropToCanvas(bitmap, rect, dpr) {
   return canvas;
 }
 
+// Prepares a crop for OCR:
+//   1. Upscale 3x (Tesseract accuracy rises sharply once cap-height >= 30 px).
+//   2. Grayscale via luminance.
+//   3. If the mean is dark, invert so text becomes dark-on-light -- Otsu
+//      thresholding inside Tesseract works much better that way. This is the
+//      common case on retail stickers (red/yellow backgrounds, white text).
+//   4. Stretch contrast to [0,255].
+function preprocess(srcCanvas) {
+  const scale = 3;
+  const w = srcCanvas.width * scale;
+  const h = srcCanvas.height * scale;
+  const out = new OffscreenCanvas(w, h);
+  const ctx = out.getContext("2d", { willReadFrequently: true });
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(srcCanvas, 0, 0, w, h);
+
+  const img = ctx.getImageData(0, 0, w, h);
+  const data = img.data;
+  const n = data.length;
+
+  // Pass 1: grayscale + track mean/min/max.
+  let sum = 0;
+  let min = 255;
+  let max = 0;
+  for (let i = 0; i < n; i += 4) {
+    const g = (data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114) | 0;
+    data[i] = data[i + 1] = data[i + 2] = g;
+    sum += g;
+    if (g < min) min = g;
+    if (g > max) max = g;
+  }
+  const mean = sum / (n / 4);
+  const invert = mean < 128;
+
+  // Pass 2: optional invert + contrast stretch to [0,255].
+  let lo = invert ? 255 - max : min;
+  let hi = invert ? 255 - min : max;
+  const range = Math.max(1, hi - lo);
+  for (let i = 0; i < n; i += 4) {
+    let g = data[i];
+    if (invert) g = 255 - g;
+    g = ((g - lo) * 255 / range) | 0;
+    if (g < 0) g = 0;
+    else if (g > 255) g = 255;
+    data[i] = data[i + 1] = data[i + 2] = g;
+  }
+  ctx.putImageData(img, 0, 0);
+  return out;
+}
+
 function flattenWords(data) {
   const out = [];
   if (!data || !data.blocks) return out;
+  let lineId = 0;
   for (const block of data.blocks) {
     for (const para of block.paragraphs || []) {
       for (const line of para.lines || []) {
@@ -49,8 +104,9 @@ function flattenWords(data) {
           if (!w || !w.text) continue;
           const t = w.text.trim();
           if (!t) continue;
-          out.push({ text: t, bbox: w.bbox });
+          out.push({ text: t, bbox: w.bbox, lineId });
         }
+        lineId++;
       }
     }
   }
@@ -60,8 +116,9 @@ function flattenWords(data) {
 async function runOcr(dataUrl, rect, dpr) {
   const worker = await getWorker();
   const bitmap = await dataUrlToBitmap(dataUrl);
-  const canvas = await cropToCanvas(bitmap, rect, dpr);
-  const result = await worker.recognize(canvas, {}, { blocks: true });
+  const cropped = await cropToCanvas(bitmap, rect, dpr);
+  const prepped = preprocess(cropped);
+  const result = await worker.recognize(prepped, {}, { blocks: true });
   bitmap.close && bitmap.close();
   return flattenWords(result.data);
 }
@@ -71,5 +128,5 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   runOcr(msg.dataUrl, msg.rect, msg.dpr || 1)
     .then((words) => sendResponse({ ok: true, words }))
     .catch((err) => sendResponse({ ok: false, error: String(err && err.message || err) }));
-  return true; // async response
+  return true;
 });
