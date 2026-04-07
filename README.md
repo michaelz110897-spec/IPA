@@ -1,14 +1,22 @@
 # Price Comparison Scanner
 
-A Chrome/Edge (Manifest V3) browser extension that draws a 100×162 px rectangle around your cursor and live-calculates the `%off` from a displayed price and `SAVE` amount inside that rectangle. Works on HTML pages and PDFs.
+A Chrome/Edge (Manifest V3) browser extension that draws a 150×160 px rectangle
+around your cursor and live-calculates the `%off` from a displayed price and
+`SAVE` amount inside that rectangle. Reads pixels via OCR, so it works on
+plain HTML, images, PDFs, and cross-origin iframes alike.
 
 ## How it works
 
 - Click the toolbar icon to activate on the current tab (click again to deactivate).
 - A dashed rectangle follows your cursor.
-- The extension scans text nodes inside the rectangle for:
-  - **Price** — a plain dollar amount (e.g. `$49.99`) *not* preceded by a letter/word.
-  - **Savings** — a dollar amount preceded by the word `SAVE` (e.g. `SAVE $10.00`).
+- When the cursor settles for ~250 ms, the extension captures the visible tab,
+  crops to the rectangle, and runs Tesseract.js OCR on the crop.
+- The word boxes returned by OCR are parsed for:
+  - **Price** — a dollar amount that has no letter word immediately to its left
+    on the same visual line (so `Was $10` and `Reg $15` are skipped). The largest
+    such number wins, with `$`-prefixed numbers preferred.
+  - **Savings** — the dollar amount physically next to the word `SAVE` on the
+    same visual line (spatial association, not just regex order).
 - When both are detected, a small label above the top border shows:
 
   ```
@@ -32,46 +40,28 @@ Create a file `test.html` with:
 <div style="font-size:24px;padding:40px">$49.99 SAVE $10.00</div>
 ```
 
-Open it, click the extension icon, and hover over the text. The label should read `16.67% off`.
+Open it, click the extension icon, hover over the text, and hold still for
+~300 ms. The label should read `16.67% off`.
 
-## PDF support
+## Notes
 
-The extension can also scan prices inside PDF documents. Because Chrome does
-not allow content scripts to inject into the built-in PDF viewer, the extension
-ships its own viewer (built on Mozilla PDF.js) and automatically switches to it
-when you click the toolbar icon on a PDF tab.
-
-- Remote (http/https) PDFs work out of the box.
-- For local `file://` PDFs, enable **Allow access to file URLs** for the
-  extension at `chrome://extensions` → Details.
-- After redirection, each page is rendered with a selectable text layer that
-  the scanner reads from as you move your cursor.
-
-## Known limitations
-
-### Adobe Acrobat browser extension
-If you have the **Adobe Acrobat: PDF edit, convert, sign tools** Chrome
-extension installed, it intercepts PDF navigations and renders them inside
-its own extension pages. Chrome forbids any other extension from injecting
-into Adobe's viewer, so the scanner cannot read that content directly.
-
-The extension will try a best-effort recovery: if Adobe exposes the original
-PDF URL in its viewer's query string, clicking the toolbar icon will redirect
-the tab to the bundled PDF.js viewer and scanning will work normally. When
-Adobe hides the URL (e.g. it loads the PDF from `acrobat.adobe.com`), you will
-see a notification explaining the limitation.
-
-**Workaround**: disable the Adobe Acrobat extension on the page you want to
-scan, or turn off its "Open in Acrobat" / default-PDF-handler setting, then
-reload. The PDF will then open in Chrome's built-in viewer and the scanner
-will redirect it to the bundled PDF.js viewer automatically.
+- **First scan is slow.** The first OCR call in a session has to load the
+  Tesseract WebAssembly runtime and the English language model (~13 MB
+  vendored). Expect ~1 s. Subsequent scans reuse the warmed worker and
+  typically take 150–400 ms on a 150×160 crop.
+- **Capture rate.** Chrome rate-limits `captureVisibleTab` to about 2 Hz.
+  The 250 ms settle debounce keeps us well under that.
+- **No special PDF mode.** Because everything is OCR over screen pixels, the
+  extension reads PDFs in Chrome's built-in viewer, the Adobe Acrobat browser
+  extension, image-only flyers, and cross-origin embedded viewers without any
+  separate viewer page.
 
 ## Files
 
 - `manifest.json` — MV3 manifest
-- `background.js` — toggles activation per tab on icon click; redirects PDFs to the bundled viewer
-- `content.js` — overlay, cursor tracking, text scanning, price/save detection
+- `background.js` — icon toggle + `captureVisibleTab` + offscreen-document routing
+- `offscreen.html` / `offscreen.js` — hosts the long-lived Tesseract.js worker
+- `content.js` — overlay, cursor tracking, debounced scan request, spatial parser
 - `content.css` — overlay + label styles
-- `pdf-viewer.html` / `pdf-viewer.js` — PDF.js-based viewer with a text layer
-- `vendor/pdfjs/` — vendored PDF.js build (legacy ESM)
+- `vendor/tesseract/` — vendored Tesseract.js v5 runtime, WASM, and English model
 - `icons/` — toolbar icons

@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Price Comparison Scanner",
-  "version": "0.2.0",
-  "description": "Scan a rectangular area around the cursor for a price and a SAVE amount, and display the calculated %off live. Works on HTML pages and PDFs.",
+  "version": "0.3.0",
+  "description": "Scan a rectangular area around the cursor with OCR to read price and SAVE amounts and display the calculated %off live. Works on HTML, PDFs, images, and cross-origin iframes.",
   "action": {
     "default_title": "Toggle Price Scanner",
     "default_icon": {
@@ -28,15 +28,11 @@
       "all_frames": false
     }
   ],
-  "permissions": ["activeTab", "scripting", "storage", "notifications"],
+  "permissions": ["activeTab", "scripting", "offscreen"],
   "host_permissions": ["<all_urls>"],
   "web_accessible_resources": [
     {
-      "resources": [
-        "pdf-viewer.html",
-        "pdf-viewer.js",
-        "vendor/pdfjs/*"
-      ],
+      "resources": ["vendor/tesseract/*"],
       "matches": ["<all_urls>"]
     }
   ]
