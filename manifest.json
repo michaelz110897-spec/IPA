@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Price Comparison Scanner",
-  "version": "0.3.0",
-  "description": "Scan a rectangular area around the cursor with OCR to read price and SAVE amounts and display the calculated %off live. Works on HTML, PDFs, images, and cross-origin iframes.",
+  "version": "0.4.0",
+  "description": "Hover a 130x130 cursor box over any price (HTML, JS-rendered, or image) to read the current price, save amount, and computed %off in real time. Falls back to local OCR for image-baked prices.",
   "action": {
     "default_title": "Toggle Price Scanner",
     "default_icon": {
@@ -25,7 +25,7 @@
       "js": ["content.js"],
       "css": ["content.css"],
       "run_at": "document_idle",
-      "all_frames": false
+      "all_frames": true
     }
   ],
   "permissions": ["activeTab", "scripting", "offscreen"],
