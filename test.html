@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Price Comparison Scanner — manual test page</title>
+  <style>
+    body {
+      font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+      padding: 32px;
+      max-width: 920px;
+      margin: 0 auto;
+    }
+    h2 { margin-top: 40px; border-bottom: 1px solid #ccc; padding-bottom: 4px; }
+    .case { padding: 24px; margin: 16px 0; border: 1px solid #eee; border-radius: 8px; }
+    .case .desc { color: #666; font-size: 13px; margin-bottom: 8px; }
+    .price { font-size: 28px; font-weight: 700; }
+    .strike { text-decoration: line-through; color: #999; }
+    .save { color: #c00; font-weight: 600; }
+    .sticker { display: inline-block; padding: 16px 24px; background: #ffeb3b; border-radius: 6px; font-family: Arial; }
+    .big { font-size: 48px; font-weight: 800; }
+    .sup { font-size: 22px; vertical-align: super; }
+  </style>
+</head>
+<body>
+  <h1>Price Scanner Manual Test</h1>
+  <p>Enable the extension (toolbar icon), then hover the cursor box over each
+     price below. The label should appear next to the cursor with the parsed
+     price, save amount, and computed % off.</p>
+
+  <h2>Case 1 — flat "$X SAVE $Y" (DOM path)</h2>
+  <div class="case">
+    <div class="desc">Expected: $49.99 · save $10.00 · 16.67% off</div>
+    <div class="price">$49.99 SAVE $10.00</div>
+  </div>
+
+  <h2>Case 2 — strikethrough "was" price (DOM path)</h2>
+  <div class="case">
+    <div class="desc">Expected: $39.99 · was $59.99 · 33.34% off</div>
+    <div class="price">
+      <span class="strike">$59.99</span>
+      <span>$39.99</span>
+    </div>
+  </div>
+
+  <h2>Case 3 — direct percent off (DOM path)</h2>
+  <div class="case">
+    <div class="desc">Expected: $19.99 · 25.00% off</div>
+    <div class="price">$19.99 — 25% off</div>
+  </div>
+
+  <h2>Case 4 — "now" / "was" prefixes (DOM path)</h2>
+  <div class="case">
+    <div class="desc">Expected: $24.99 · was $34.99 · 28.58% off</div>
+    <div class="price">Now $24.99 (was $34.99)</div>
+  </div>
+
+  <h2>Case 5 — split big-dollar / small-cents typography (DOM path)</h2>
+  <div class="case">
+    <div class="desc">Expected: $11.99 detected, plus save $3.00 → 20.04% off</div>
+    <div class="sticker">
+      <span class="big">$11<span class="sup">99</span></span>
+      <div class="save">SAVE $3.00</div>
+    </div>
+  </div>
+
+  <h2>Case 6 — JS-rendered (DOM path)</h2>
+  <div class="case">
+    <div class="desc">Expected: $12.34 · save $2.00 · 13.95% off</div>
+    <div id="js-price" class="price"></div>
+    <script>
+      setTimeout(() => {
+        document.getElementById("js-price").textContent = "$12.34 SAVE $2.00";
+      }, 200);
+    </script>
+  </div>
+
+  <h2>Case 7 — image-baked price (OCR fallback)</h2>
+  <div class="case">
+    <div class="desc">Inline SVG used as &lt;img&gt; via data URL — DOM has no
+        text, the OCR path should kick in. Expected: $29.99 · save $5.00 · 14.29% off</div>
+    <img alt="price tag"
+         width="260" height="120"
+         src='data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="260" height="120"><rect width="260" height="120" fill="%23ffeb3b"/><text x="20" y="60" font-family="Arial" font-size="44" font-weight="bold" fill="black">%2429.99</text><text x="20" y="100" font-family="Arial" font-size="22" font-weight="bold" fill="%23c00000">SAVE %245.00</text></svg>' />
+  </div>
+
+  <h2>Case 8 — canvas-rendered price (OCR fallback)</h2>
+  <div class="case">
+    <div class="desc">Expected: $7.49 detected via OCR.</div>
+    <canvas id="cvs" width="300" height="120"></canvas>
+    <script>
+      (function() {
+        const c = document.getElementById("cvs");
+        const ctx = c.getContext("2d");
+        ctx.fillStyle = "#fff5d6";
+        ctx.fillRect(0, 0, 300, 120);
+        ctx.fillStyle = "#000";
+        ctx.font = "bold 56px Arial";
+        ctx.fillText("$7.49", 20, 80);
+      })();
+    </script>
+  </div>
+
+  <h2>Case 9 — irrelevant text (no price)</h2>
+  <div class="case">
+    <div class="desc">Expected: — (dashes — no price found)</div>
+    <p>The quick brown fox jumps over the lazy dog.</p>
+  </div>
+</body>
+</html>

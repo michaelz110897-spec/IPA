@@ -42,26 +42,22 @@ async function cropToCanvas(bitmap, rect, dpr) {
   return canvas;
 }
 
-// Prepares a crop for OCR:
-//   1. Optional 3x upscale for small crops (Tesseract accuracy rises sharply
-//      once cap-height >= 30 px). Skipped for full-viewport scans -- upscaling
-//      a 1920x1080 capture to ~5760x3240 would blow memory and take 30+ s.
+// Prepares the 130x130 crop for OCR:
+//   1. 3x upscale (Tesseract accuracy rises sharply once cap-height >= 30 px,
+//      and a 130x130 crop is small enough that upscaling is cheap and
+//      essential for legibility).
 //   2. Grayscale via luminance.
 //   3. Contrast stretch to [0,255].
-// Auto-invert is intentionally NOT done here: on a whole-viewport image the
-// mean luminance is dominated by light background, so a global invert either
-// never fires or fires on the wrong region. Tesseract's per-region adaptive
-// thresholding (PSM 11) handles mixed-contrast pages itself.
-function preprocess(srcCanvas, upscale) {
-  const scale = upscale ? 3 : 1;
+// Tesseract's per-region adaptive thresholding (PSM 11) handles light/dark
+// mixed-contrast tags itself, so we don't auto-invert here.
+function preprocess(srcCanvas) {
+  const scale = 3;
   const w = srcCanvas.width * scale;
   const h = srcCanvas.height * scale;
   const out = new OffscreenCanvas(w, h);
   const ctx = out.getContext("2d", { willReadFrequently: true });
-  if (upscale) {
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = "high";
-  }
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
   ctx.drawImage(srcCanvas, 0, 0, w, h);
 
   const img = ctx.getImageData(0, 0, w, h);
@@ -111,11 +107,11 @@ function flattenWords(data) {
   return out;
 }
 
-async function runOcr(dataUrl, rect, dpr, fullViewport) {
+async function runOcr(dataUrl, rect, dpr) {
   const worker = await getWorker();
   const bitmap = await dataUrlToBitmap(dataUrl);
   const cropped = await cropToCanvas(bitmap, rect, dpr);
-  const prepped = preprocess(cropped, !fullViewport);
+  const prepped = preprocess(cropped);
   const result = await worker.recognize(prepped, {}, { blocks: true });
   bitmap.close && bitmap.close();
   return flattenWords(result.data);
@@ -123,7 +119,7 @@ async function runOcr(dataUrl, rect, dpr, fullViewport) {
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (!msg || msg.target !== "offscreen" || msg.type !== "pce-ocr") return;
-  runOcr(msg.dataUrl, msg.rect, msg.dpr || 1, !!msg.fullViewport)
+  runOcr(msg.dataUrl, msg.rect, msg.dpr || 1)
     .then((words) => sendResponse({ ok: true, words }))
     .catch((err) => sendResponse({ ok: false, error: String(err && err.message || err) }));
   return true;
