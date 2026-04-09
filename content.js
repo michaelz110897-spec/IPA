@@ -37,6 +37,8 @@
           type: "subframe-mousemove",
           cx: ev.clientX,
           cy: ev.clientY,
+          fw: window.innerWidth,
+          fh: window.innerHeight,
         }, "*");
       } catch (_) { /* nothing useful to do */ }
     }, true);
@@ -57,12 +59,16 @@
       }
       if (!childEl) return;
       const r = childEl.getBoundingClientRect();
+      const sx = data.fw > 0 ? r.width / data.fw : 1;
+      const sy = data.fh > 0 ? r.height / data.fh : 1;
       try {
         window.parent.postMessage({
           __pce: true,
           type: "subframe-mousemove",
-          cx: r.left + (data.cx || 0),
-          cy: r.top + (data.cy || 0),
+          cx: r.left + (data.cx || 0) * sx,
+          cy: r.top + (data.cy || 0) * sy,
+          fw: window.innerWidth,
+          fh: window.innerHeight,
         }, "*");
       } catch (_) { /* nothing useful to do */ }
     }, true);
@@ -134,8 +140,10 @@
     }
     if (!iframeEl) return;
     const r = iframeEl.getBoundingClientRect();
-    const x = r.left + (data.cx || 0);
-    const y = r.top + (data.cy || 0);
+    const sx = data.fw > 0 ? r.width / data.fw : 1;
+    const sy = data.fh > 0 ? r.height / data.fh : 1;
+    const x = r.left + (data.cx || 0) * sx;
+    const y = r.top + (data.cy || 0) * sy;
     if (x < 0 || y < 0 || x > window.innerWidth || y > window.innerHeight) return;
     lastMouseX = x;
     lastMouseY = y;
@@ -268,6 +276,13 @@
     }
 
     const result = reply.result || null;
+
+    // Diagnostic: surface the actual crop and Claude's raw response when
+    // no price is detected, so the user can inspect what was captured.
+    const isNull = !result || (result.price == null && result.was == null && result.save == null && result.pct == null);
+    if (isNull && reply.cropDataUrl) {
+      console.warn("[pce] no price detected. crop:", reply.cropDataUrl, "raw:", reply.rawText);
+    }
 
     lastScanX = cx;
     lastScanY = cy;
