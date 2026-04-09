@@ -1,32 +1,182 @@
+/* ============================================================
+   Price Comparison Scanner — visual surfaces
+   ============================================================
+   Two overlay elements:
+     .pce-cursor-box   — viewfinder around the cursor
+     .pce-result-label — glass HUD pill showing parsed result
+   Both elements live on the document root with pointer-events
+   disabled and the highest possible z-index so they overlay
+   any host page chrome without intercepting clicks.
+*/
+
+/* ---------- cursor box (viewfinder) ---------- */
+
 .pce-cursor-box {
   position: fixed;
   width: 130px;
   height: 130px;
   box-sizing: border-box;
-  border: 2px dashed #32cd32;
-  background: rgba(50, 205, 50, 0.05);
-  border-radius: 4px;
   pointer-events: none;
   z-index: 2147483647;
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4);
+
+  background: rgba(16, 185, 129, 0.03);
+  border-radius: 12px;
+
+  /* Inner ring + outer glow + drop shadow */
+  box-shadow:
+    inset 0 0 0 1px rgba(16, 185, 129, 0.25),
+    0 0 32px rgba(16, 185, 129, 0.18),
+    0 12px 40px rgba(0, 0, 0, 0.15);
+
+  transition: box-shadow 0.25s ease, background 0.25s ease;
+  will-change: transform;
 }
+
+.pce-cursor-box .pce-corner {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  border: 2px solid #10b981;
+  pointer-events: none;
+}
+
+.pce-cursor-box .pce-corner-tl {
+  top: -2px;
+  left: -2px;
+  border-right: 0;
+  border-bottom: 0;
+  border-top-left-radius: 8px;
+}
+
+.pce-cursor-box .pce-corner-tr {
+  top: -2px;
+  right: -2px;
+  border-left: 0;
+  border-bottom: 0;
+  border-top-right-radius: 8px;
+}
+
+.pce-cursor-box .pce-corner-bl {
+  bottom: -2px;
+  left: -2px;
+  border-right: 0;
+  border-top: 0;
+  border-bottom-left-radius: 8px;
+}
+
+.pce-cursor-box .pce-corner-br {
+  bottom: -2px;
+  right: -2px;
+  border-left: 0;
+  border-top: 0;
+  border-bottom-right-radius: 8px;
+}
+
+.pce-cursor-box .pce-center-dot {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 4px;
+  height: 4px;
+  background: #10b981;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 0 8px rgba(16, 185, 129, 0.7);
+}
+
+/* Active scan: stronger glow + pulsing corners */
+.pce-cursor-box.pce-scanning {
+  background: rgba(16, 185, 129, 0.05);
+  box-shadow:
+    inset 0 0 0 1px rgba(16, 185, 129, 0.4),
+    0 0 48px rgba(16, 185, 129, 0.32),
+    0 12px 40px rgba(0, 0, 0, 0.18);
+}
+
+.pce-cursor-box.pce-scanning .pce-corner {
+  animation: pce-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pce-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.5; }
+}
+
+/* ---------- result label (glass HUD) ---------- */
 
 .pce-result-label {
   position: fixed;
-  background: #111111;
-  color: #ffffff;
-  font: 12px/1.3 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  padding: 4px 8px;
-  border-radius: 4px;
-  white-space: nowrap;
   pointer-events: none;
   z-index: 2147483647;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
-  max-width: 240px;
-  overflow: hidden;
-  text-overflow: ellipsis;
+
+  display: flex;
+  align-items: center;
+  gap: 10px;
+
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+
+  background: rgba(17, 24, 39, 0.92);
+  -webkit-backdrop-filter: blur(12px) saturate(180%);
+  backdrop-filter: blur(12px) saturate(180%);
+
+  color: #f9fafb;
+  font: 500 13px/1.4 -apple-system, "SF Pro Display", "Inter",
+        system-ui, "Segoe UI", sans-serif;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+
+  box-shadow:
+    0 4px 12px rgba(0, 0, 0, 0.25),
+    0 12px 32px rgba(0, 0, 0, 0.18);
+
+  opacity: 0;
+  transform: translateY(4px) scale(0.96);
+  transition: opacity 0.18s ease, transform 0.18s ease;
 }
 
-.pce-result-empty {
-  color: #888888;
+.pce-result-label.pce-visible {
+  opacity: 1;
+  transform: none;
+}
+
+/* Semantic colour for each part */
+
+.pce-result-label .pce-price {
+  color: #f9fafb;
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.pce-result-label .pce-was {
+  color: #9ca3af;
+  font-size: 12px;
+}
+
+.pce-result-label .pce-was s {
+  text-decoration-line: line-through;
+  text-decoration-color: rgba(156, 163, 175, 0.7);
+}
+
+.pce-result-label .pce-save {
+  color: #fbbf24;
+  font-weight: 500;
+  font-size: 13px;
+}
+
+.pce-result-label .pce-pct {
+  color: #10b981;
+  font-weight: 600;
+  font-size: 12px;
+  background: rgba(16, 185, 129, 0.15);
+  padding: 3px 7px;
+  border-radius: 6px;
+  letter-spacing: 0.02em;
+}
+
+.pce-result-label .pce-empty {
+  color: #9ca3af;
+  font-style: italic;
+  font-weight: 400;
 }

@@ -129,7 +129,23 @@
     if (cursorBox) return;
     cursorBox = document.createElement("div");
     cursorBox.className = "pce-cursor-box";
+    // Four L-shaped corner brackets give the box a viewfinder look.
+    const cornerKeys = ["tl", "tr", "bl", "br"];
+    for (const k of cornerKeys) {
+      const c = document.createElement("div");
+      c.className = "pce-corner pce-corner-" + k;
+      cursorBox.appendChild(c);
+    }
+    // Center dot for precision aiming.
+    const dot = document.createElement("div");
+    dot.className = "pce-center-dot";
+    cursorBox.appendChild(dot);
     document.documentElement.appendChild(cursorBox);
+  }
+
+  function setScanningState(active) {
+    if (!cursorBox) return;
+    cursorBox.classList.toggle("pce-scanning", !!active);
   }
 
   function removeCursorBox() {
@@ -215,6 +231,7 @@
     const cx = lastMouseX;
     const cy = lastMouseY;
     const rect = { x: cx - HALF, y: cy - HALF, w: BOX_SIZE, h: BOX_SIZE };
+    setScanningState(true);
 
     // Phase 1 — DOM
     let result = scanDom(rect);
@@ -245,6 +262,7 @@
     if (result) {
       resultCache.set(cacheKey(cx, cy), { result, ts: Date.now() });
     }
+    setScanningState(false);
     renderLabel(result);
   }
 
@@ -720,20 +738,40 @@
   function renderLabel(result) {
     ensureLabel();
     moveLabel(lastMouseX, lastMouseY);
+    labelEl.replaceChildren();
 
     if (!result || (result.price == null && result.save == null && result.was == null && result.pct == null)) {
-      labelEl.textContent = "—";
       labelEl.classList.add("pce-result-empty");
+      labelEl.appendChild(makeSpan("pce-empty", "No price detected"));
+      requestAnimationFrame(() => { if (labelEl) labelEl.classList.add("pce-visible"); });
       return;
     }
     labelEl.classList.remove("pce-result-empty");
 
-    const parts = [];
-    if (result.price != null) parts.push(formatMoney(result.price));
-    if (result.was != null && result.was !== result.price) parts.push("was " + formatMoney(result.was));
-    if (result.save != null) parts.push("save " + formatMoney(result.save));
-    if (result.pct != null) parts.push(result.pct.toFixed(2) + "% off");
-    labelEl.textContent = parts.join(" · ");
+    if (result.price != null) {
+      labelEl.appendChild(makeSpan("pce-price", formatMoney(result.price)));
+    }
+    if (result.was != null && result.was !== result.price) {
+      const wasSpan = makeSpan("pce-was");
+      const s = document.createElement("s");
+      s.textContent = formatMoney(result.was);
+      wasSpan.appendChild(s);
+      labelEl.appendChild(wasSpan);
+    }
+    if (result.save != null) {
+      labelEl.appendChild(makeSpan("pce-save", "save " + formatMoney(result.save)));
+    }
+    if (result.pct != null) {
+      labelEl.appendChild(makeSpan("pce-pct", "\u2212" + Math.round(result.pct) + "%"));
+    }
+    requestAnimationFrame(() => { if (labelEl) labelEl.classList.add("pce-visible"); });
+  }
+
+  function makeSpan(className, text) {
+    const el = document.createElement("span");
+    el.className = className;
+    if (text != null) el.textContent = text;
+    return el;
   }
 
   function formatMoney(n) {
