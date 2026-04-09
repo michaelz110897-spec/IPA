@@ -1,75 +1,75 @@
 # Price Comparison Scanner
 
-A Chrome/Edge (Manifest V3) browser extension that scans the visible page for
-retail price stickers and draws highlights on every price and `SAVE` amount it
-finds, labeled with the computed `%off`. Reads pixels via OCR, so it works on
-plain HTML, images, PDFs, and cross-origin iframes alike.
+A Chrome/Edge (Manifest V3) browser extension that reads retail prices from
+the area around your cursor on any webpage. The 130&times;130&nbsp;px region
+under the cursor is captured as an image and sent to Claude Sonnet's vision
+API, which returns the current price, save amount, and percent off.
+
+Because detection is purely visual, it works the same way on plain HTML,
+JavaScript-rendered text, image-baked prices, canvas/SVG, and PDF viewers.
 
 ## How it works
 
-- Click the toolbar icon on any page. A small "Scanning page…" chip
-  appears in the top-right while OCR runs.
-- The extension captures the whole visible viewport, runs Tesseract.js over it,
-  and spatially clusters the OCR words into per-sticker groups.
-- For each sticker it identifies:
-  - **Price** — a dollar amount that has no `Was`/`Reg`/`MSRP`-style word
-    immediately to its left on the same visual line. Big-dollar + small-cents
-    typographic splits (e.g. `$11` with a superscript `99`) are fused into one
-    price. Prefixes like `FROM`, `NOW`, `ONLY` are recognised.
-  - **Savings** — the nearest dollar amount in a local neighborhood around a
-    `SAVE` marker word (handles `SAVE $X`, `SAVE UP TO $X`, multi-line bands,
-    trailing disclaimer marks).
-- Each identified pair is highlighted:
-  - Lime-green outline around the price bbox.
-  - Orange outline around the save bbox.
-  - A dark pill floating above the price with e.g.
-    `$21.99 · save $15.00 · 40.54% off`.
-- Prices without a matching `SAVE` band are still highlighted, labeled with
-  just the price.
-- Click the icon again to clear all highlights.
-- Formula: `%off = save / (price + save) * 100` (rounded to 2 decimals).
+- Click the toolbar icon on any page. A small viewfinder (4 emerald corner
+  brackets + a centre dot) follows the cursor.
+- Hover over a price. After ~500&nbsp;ms of stillness the corners pulse,
+  the extension captures that 130&times;130 box as a PNG, and sends it to
+  Claude Sonnet's vision endpoint.
+- Claude returns a small JSON object: `{price, was, save, pct}`.
+- A glass HUD pill renders next to the cursor: white price, gray
+  strike-through `was`, amber `save`, and an emerald `&minus;%` chip.
+- Move the cursor and the next stop fires another scan. Recent scans are
+  cached for ~5&nbsp;s so re-hovering the same spot is instant.
+- Click the icon again to disable.
 
-## Install (unpacked)
+## Setup
+
+The extension needs an Anthropic API key.
 
 1. Open `chrome://extensions` (or `edge://extensions`).
 2. Enable **Developer mode**.
 3. Click **Load unpacked** and select this folder.
-4. Pin the extension and click its icon on any page to scan it.
+4. Click **Details** on the extension &rarr; **Extension options**.
+5. Paste your Anthropic API key (starts with `sk-ant-`) and click **Save**.
+   Get a key at <https://console.anthropic.com/settings/keys>.
+
+The key is stored in `chrome.storage.local` and is only sent to
+`https://api.anthropic.com`.
 
 ## Quick test
 
-Create a file `test.html` with:
-
-```html
-<div style="font-size:24px;padding:40px">$49.99 SAVE $10.00</div>
-```
-
-Open it and click the extension icon. Within a few seconds you should see a
-green outline on `$49.99`, an orange outline on `$10.00`, and a label reading
-`$49.99 · save $10.00 · 16.67% off`.
+`test.html` ships with nine sample price layouts (flat, strikethrough,
+percent-off, split typography, JS-rendered, image-baked, canvas-rendered, and
+an irrelevant control). Open it from disk, click the toolbar icon, hover any
+price, and the HUD should populate within ~1&ndash;2&nbsp;s of the cursor
+stopping.
 
 ## Notes
 
-- **First scan is slow.** The first OCR call in a session has to load the
-  Tesseract WebAssembly runtime and the English language model (~13 MB
-  vendored). A full-viewport scan on a 1920×1080 capture typically takes
-  2–5 s warm. Subsequent scans reuse the warmed worker.
-- **No cursor tracking.** Rev 6 replaced the cursor-following rectangle with
-  a one-shot full-page scan: you get every price at once instead of having to
-  hover each sticker.
-- **Highlights scroll with the page.** Overlays are page-absolute, so
-  scrolling after a scan still aligns them with the underlying content.
-- **No special PDF mode.** Because everything is OCR over screen pixels, the
-  extension reads PDFs in Chrome's built-in viewer, the Adobe Acrobat browser
-  extension, image-only flyers, and cross-origin embedded viewers without any
-  separate viewer page.
+- **Cost.** Each scan sends one small image (~130&times;130) to Claude
+  Sonnet plus a short prompt and gets back &lt;60 tokens. Scans are
+  debounced (500&nbsp;ms idle), thresholded (must move 50&nbsp;px before a
+  new scan fires), and cached for 5&nbsp;s, so a typical browsing session
+  fires only a few calls per minute.
+- **Latency.** A scan typically lands in 1&ndash;2&nbsp;s. The viewfinder
+  pulses while the request is in flight.
+- **Cross-origin iframes.** The content script runs in every frame
+  (`all_frames: true`) and sub-frames forward mousemove coordinates to the
+  top frame, so the scanner works inside Adobe's PDF viewer and similar
+  embedded contexts.
+- **No local OCR.** Earlier revisions used Tesseract.js with a vendored
+  language model. The vision-only design removes that ~13&nbsp;MB vendor
+  bundle entirely.
 
 ## Files
 
-- `manifest.json` — MV3 manifest
-- `background.js` — icon toggle + `captureVisibleTab` + offscreen-document routing
-- `offscreen.html` / `offscreen.js` — hosts the long-lived Tesseract.js worker
-- `content.js` — one-shot viewport scan, spatial clustering, highlight rendering
-- `content.css` — highlight and toast styles
-- `vendor/tesseract/` — vendored Tesseract.js v5 runtime, WASM, and English model
-- `icons/` — toolbar icons
+- `manifest.json` &mdash; MV3 manifest, options page, host permissions for
+  `api.anthropic.com`.
+- `background.js` &mdash; toolbar toggle, `captureVisibleTab` &rarr; in-worker
+  crop &rarr; Anthropic Messages API call &rarr; structured JSON parse.
+- `content.js` &mdash; cursor viewfinder, mouse handling, debounced scan
+  scheduling, label rendering, cross-frame postMessage bridge.
+- `content.css` &mdash; viewfinder + glass HUD styles.
+- `options.html` / `options.js` &mdash; API key entry/storage.
+- `test.html` &mdash; sample price layouts for smoke-testing.
+- `icons/` &mdash; toolbar icons.

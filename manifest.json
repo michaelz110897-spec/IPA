@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Price Comparison Scanner",
-  "version": "0.4.0",
-  "description": "Hover a 130x130 cursor box over any price (HTML, JS-rendered, or image) to read the current price, save amount, and computed %off in real time. Falls back to local OCR for image-baked prices.",
+  "version": "0.5.0",
+  "description": "Hover a 130x130 cursor box over any price (HTML, JS-rendered, or image) to read the current price, save amount, and computed %off in real time. Powered by Claude vision.",
   "action": {
     "default_title": "Toggle Price Scanner",
     "default_icon": {
@@ -28,12 +28,10 @@
       "all_frames": true
     }
   ],
-  "permissions": ["activeTab", "scripting", "offscreen"],
-  "host_permissions": ["<all_urls>"],
-  "web_accessible_resources": [
-    {
-      "resources": ["vendor/tesseract/*"],
-      "matches": ["<all_urls>"]
-    }
-  ]
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
+  "permissions": ["activeTab", "scripting", "storage"],
+  "host_permissions": ["<all_urls>", "https://api.anthropic.com/*"]
 }
