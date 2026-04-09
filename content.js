@@ -19,10 +19,13 @@
   //
   // The extension runs inside every frame (manifest all_frames=true) so it
   // can detect mousemove on cross-origin iframes such as Adobe Acrobat's PDF
-  // viewer. Only the TOP frame draws the cursor box and runs scans; sub-
-  // frames merely forward mousemove coordinates to the top frame via
-  // postMessage so the top frame can position its single cursor box and
-  // capture the right pixels.
+  // viewer. Only the TOP frame draws the cursor box and runs scans; non-top
+  // frames forward their own mousemove events to their parent AND relay
+  // forwarded messages from their own child iframes (translating each step
+  // by the child iframe's bounding rect). This recursion lets coordinates
+  // climb arbitrarily deep iframe trees — Adobe's viewer is at least
+  // top → viewer iframe → PDF iframe, and the original single-level bridge
+  // never reached the top frame.
 
   const isTopFrame = (window === window.top);
 
@@ -37,6 +40,33 @@
         }, "*");
       } catch (_) { /* nothing useful to do */ }
     }, true);
+
+    // Relay forwarded messages from our own child iframes one level up,
+    // translating the coordinate by the child iframe's position within
+    // this frame's viewport. The top frame's listener does the final
+    // translation into top-frame viewport coordinates.
+    window.addEventListener("message", (ev) => {
+      const data = ev.data;
+      if (!data || !data.__pce || data.type !== "subframe-mousemove") return;
+      if (ev.source === window || ev.source === window.parent) return;
+      const iframes = document.querySelectorAll("iframe, frame");
+      let childEl = null;
+      for (const f of iframes) {
+        try { if (f.contentWindow === ev.source) { childEl = f; break; } }
+        catch (_) { /* cross-origin contentWindow access throws */ }
+      }
+      if (!childEl) return;
+      const r = childEl.getBoundingClientRect();
+      try {
+        window.parent.postMessage({
+          __pce: true,
+          type: "subframe-mousemove",
+          cx: r.left + (data.cx || 0),
+          cy: r.top + (data.cy || 0),
+        }, "*");
+      } catch (_) { /* nothing useful to do */ }
+    }, true);
+
     return;
   }
 

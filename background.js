@@ -16,11 +16,14 @@ const MAX_TOKENS = 200;
 
 const PRICE_PROMPT = [
   "You are a price extraction tool. The image is a small screenshot crop",
-  "showing the area around a user's cursor on a webpage.",
+  "(roughly 130x130 css px, upscaled 3x) showing the area around a user's",
+  "cursor on a webpage, web app, or PDF document.",
   "",
-  "Identify the single most prominent retail price the user is hovering on,",
-  "and report its current price, original (was) price if shown, savings",
-  "amount if shown, and percent off if shown.",
+  "Read every visible character carefully — the crop may contain a price",
+  "tag, a product listing, a line in a PDF table, an invoice row, body",
+  "text mentioning a dollar amount, or just an empty area. Extract the",
+  "single most prominent monetary price you see, even if it is rendered",
+  "in plain body text without bold or color emphasis.",
   "",
   "Return ONLY a JSON object on one line, with no prose, no markdown, no",
   "code fences. Schema:",
@@ -28,14 +31,20 @@ const PRICE_PROMPT = [
   "",
   "Field semantics:",
   "  price : the current/sale price in dollars as a number (e.g. 49.99).",
+  "          If only one price is shown, that is the price.",
   "  was   : the original/regular/list/MSRP price if shown (often",
-  "          strikethrough). Number, or null.",
+  "          strikethrough or labelled was/reg/orig/list/msrp). Number,",
+  "          or null.",
   "  save  : the savings amount in dollars (e.g. SAVE $10 -> 10). Number,",
   "          or null.",
   "  pct   : the discount percent as an integer (e.g. 25 means 25% off),",
   "          if explicitly shown. Number, or null.",
   "",
-  "If no price is visible in the crop, return:",
+  "Recognise prices in any common format: $49.99, USD 49.99, 49.99, 49,99,",
+  "1,299.00, $1.2K, 49.99 USD. Strip currency symbols and thousands",
+  "separators when filling the JSON. If a price is partially cropped at",
+  "the edge of the image but the full number is still readable, include",
+  "it. If no price-like number is visible at all, return:",
   '  {"price": null, "was": null, "save": null, "pct": null}',
 ].join("\n");
 
@@ -101,6 +110,13 @@ async function getApiKey() {
 // and btoa, so we can do the entire capture-and-crop pipeline here without
 // needing an offscreen document.
 
+// Upscale factor applied to the cropped region before sending to vision.
+// Adobe's PDF viewer renders body text at ~10–14 px which, after a 130x130
+// crop, leaves Claude with very few pixels per glyph. A 3x upscale gives
+// the model enough resolution to read small document text reliably while
+// staying well under Claude vision's ~1568 px max-dimension limit.
+const UPSCALE = 3;
+
 async function cropToBase64(dataUrl, rect, dpr) {
   const blob = await (await fetch(dataUrl)).blob();
   const bitmap = await createImageBitmap(blob);
@@ -112,9 +128,14 @@ async function cropToBase64(dataUrl, rect, dpr) {
   const sw = Math.max(1, Math.min(Math.round(rect.w * dpr), maxW));
   const sh = Math.max(1, Math.min(Math.round(rect.h * dpr), maxH));
 
-  const canvas = new OffscreenCanvas(sw, sh);
+  const dw = sw * UPSCALE;
+  const dh = sh * UPSCALE;
+
+  const canvas = new OffscreenCanvas(dw, dh);
   const ctx = canvas.getContext("2d");
-  ctx.drawImage(bitmap, sx, sy, sw, sh, 0, 0, sw, sh);
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(bitmap, sx, sy, sw, sh, 0, 0, dw, dh);
   bitmap.close && bitmap.close();
 
   const outBlob = await canvas.convertToBlob({ type: "image/png" });
