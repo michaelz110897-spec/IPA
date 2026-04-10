@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Price Comparison Scanner — Settings</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+    }
+    body {
+      margin: 0;
+      padding: 48px 56px;
+      font: 14px/1.5 -apple-system, "SF Pro Display", "Inter", system-ui,
+            "Segoe UI", sans-serif;
+      background: #f9fafb;
+      color: #111827;
+      max-width: 640px;
+    }
+    h1 {
+      font-size: 22px;
+      font-weight: 600;
+      margin: 0 0 8px;
+      letter-spacing: -0.01em;
+    }
+    p {
+      color: #4b5563;
+      margin: 0 0 24px;
+    }
+    label {
+      display: block;
+      font-weight: 600;
+      font-size: 13px;
+      color: #111827;
+      margin-bottom: 8px;
+    }
+    input[type="password"], input[type="text"] {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 10px 12px;
+      border: 1px solid #d1d5db;
+      border-radius: 8px;
+      font: 13px ui-monospace, "SF Mono", Menlo, monospace;
+      background: #ffffff;
+      color: #111827;
+    }
+    input:focus {
+      outline: 2px solid #10b981;
+      outline-offset: 1px;
+      border-color: transparent;
+    }
+    .row {
+      display: flex;
+      gap: 8px;
+      margin-top: 12px;
+    }
+    button {
+      padding: 9px 16px;
+      border: 0;
+      border-radius: 8px;
+      font: 600 13px -apple-system, system-ui, sans-serif;
+      cursor: pointer;
+      background: #10b981;
+      color: #ffffff;
+    }
+    button.secondary {
+      background: #ffffff;
+      color: #374151;
+      border: 1px solid #d1d5db;
+    }
+    button:hover { filter: brightness(0.96); }
+    .status {
+      margin-top: 14px;
+      font-size: 13px;
+      min-height: 18px;
+    }
+    .status.ok { color: #047857; }
+    .status.err { color: #b91c1c; }
+    .hint {
+      margin-top: 32px;
+      padding: 14px 16px;
+      background: #ffffff;
+      border: 1px solid #e5e7eb;
+      border-radius: 10px;
+      font-size: 12px;
+      color: #4b5563;
+    }
+    .hint code {
+      font-family: ui-monospace, "SF Mono", Menlo, monospace;
+      font-size: 12px;
+      color: #111827;
+    }
+    @media (prefers-color-scheme: dark) {
+      body { background: #0b0f17; color: #f9fafb; }
+      p, .hint { color: #9ca3af; }
+      input[type="password"], input[type="text"] {
+        background: #111827;
+        border-color: #374151;
+        color: #f9fafb;
+      }
+      button.secondary {
+        background: #111827;
+        color: #f9fafb;
+        border-color: #374151;
+      }
+      .hint {
+        background: #111827;
+        border-color: #1f2937;
+      }
+      .hint code { color: #f9fafb; }
+    }
+  </style>
+</head>
+<body>
+  <h1>Price Comparison Scanner</h1>
+  <p>Paste your Anthropic API key to enable price detection. The key is stored
+     locally in your browser and is only sent to the Anthropic API.</p>
+
+  <label for="key">Anthropic API key</label>
+  <input id="key" type="password" placeholder="sk-ant-..." autocomplete="off" spellcheck="false" />
+
+  <div class="row">
+    <button id="save">Save</button>
+    <button id="show" class="secondary">Show</button>
+    <button id="clear" class="secondary">Clear</button>
+  </div>
+
+  <div id="status" class="status"></div>
+
+  <div class="hint">
+    The extension uses Claude Sonnet's vision capability to read the 130&times;130&nbsp;px
+    region around your cursor. Get an API key at
+    <code>https://console.anthropic.com/settings/keys</code>. Each scan sends
+    one small image and costs a fraction of a cent.
+  </div>
+
+  <script src="options.js"></script>
+</body>
+</html>
