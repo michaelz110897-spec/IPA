@@ -90,13 +90,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: "png" });
       const cropB64 = await cropToBase64(dataUrl, msg.rect, msg.dpr || 1);
       const { result, rawText } = await callClaude(apiKey, cropB64);
-      const isNull = result.price == null && result.was == null && result.save == null && result.pct == null;
-      if (isNull) {
-        console.warn("[pce] no price. rect:", msg.rect, "raw:", rawText);
-        sendResponse({ ok: true, result, rawText, cropDataUrl: "data:image/png;base64," + cropB64 });
-      } else {
-        sendResponse({ ok: true, result });
-      }
+      console.warn("[pce] rect:", msg.rect, "raw:", rawText);
+      sendResponse({ ok: true, result, rawText });
     } catch (err) {
       sendResponse({ ok: false, error: String(err && err.message || err) });
     }

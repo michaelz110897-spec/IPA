@@ -289,14 +289,8 @@
 
     const isNull = !result || (result.price == null && result.was == null && result.save == null && result.pct == null);
     if (isNull) {
-      console.warn("[pce] no price detected. raw:", reply.rawText, "crop:", reply.cropDataUrl);
-      // Show Claude's raw response in the HUD for debugging.
       setScanningState(false);
-      if (reply.rawText) {
-        renderError("Claude: " + reply.rawText.slice(0, 100));
-      } else {
-        renderError("No price detected");
-      }
+      renderError("[DBG] " + (reply.rawText || "no rawText in reply"));
       return;
     }
 
