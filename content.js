@@ -335,7 +335,7 @@
 
     if (!result || (result.price == null && result.save == null && result.was == null && result.pct == null)) {
       labelEl.classList.add("pce-result-empty");
-      labelEl.appendChild(makeSpan("pce-empty", "No price detected"));
+      labelEl.appendChild(makeSpan("pce-empty", "v4 — no price"));
       requestAnimationFrame(() => { if (labelEl) labelEl.classList.add("pce-visible"); });
       return;
     }
