@@ -91,8 +91,29 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       const cropB64 = await cropToBase64(dataUrl, msg.rect, msg.dpr || 1);
       const { result, rawText } = await callClaude(apiKey, cropB64);
       console.warn("[pce] rect:", msg.rect, "raw:", rawText);
+
+      // Badge diagnostic — visible on the toolbar icon, bypasses content script.
+      const tabId = tab.id;
+      const isNull = result.price == null && result.was == null && result.save == null && result.pct == null;
+      if (isNull) {
+        chrome.action.setBadgeText({ text: "NULL", tabId });
+        chrome.action.setBadgeBackgroundColor({ color: "#ef4444", tabId });
+        // Show first 60 chars of Claude's response as the icon tooltip.
+        chrome.action.setTitle({ title: "Claude said: " + (rawText || "").slice(0, 200), tabId });
+      } else {
+        chrome.action.setBadgeText({ text: "$" + (result.price != null ? result.price : "?"), tabId });
+        chrome.action.setBadgeBackgroundColor({ color: "#10b981", tabId });
+        chrome.action.setTitle({ title: "Detected: " + JSON.stringify(result), tabId });
+      }
+
       sendResponse({ ok: true, result, rawText });
     } catch (err) {
+      const tabId = sender.tab && sender.tab.id;
+      if (tabId) {
+        chrome.action.setBadgeText({ text: "ERR", tabId });
+        chrome.action.setBadgeBackgroundColor({ color: "#f59e0b", tabId });
+        chrome.action.setTitle({ title: "Error: " + String(err && err.message || err).slice(0, 200), tabId });
+      }
       sendResponse({ ok: false, error: String(err && err.message || err) });
     }
   })();
