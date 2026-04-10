@@ -248,6 +248,12 @@
     const rect = { x: cx - HALF, y: cy - HALF, w: BOX_SIZE, h: BOX_SIZE };
     setScanningState(true);
 
+    // Hide the overlay so it doesn't appear in the captured screenshot.
+    // Double-rAF ensures the browser paints one clean frame before capture.
+    if (cursorBox) cursorBox.style.visibility = "hidden";
+    if (labelEl) labelEl.style.visibility = "hidden";
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+
     let reply;
     try {
       reply = await chrome.runtime.sendMessage({
@@ -256,11 +262,15 @@
         dpr: window.devicePixelRatio || 1,
       });
     } catch (err) {
+      if (cursorBox) cursorBox.style.visibility = "";
+      if (labelEl) labelEl.style.visibility = "";
       if (myGen !== scanGen) return;
       setScanningState(false);
       renderError("Scan failed: " + (err && err.message || err));
       return;
     }
+    if (cursorBox) cursorBox.style.visibility = "";
+    if (labelEl) labelEl.style.visibility = "";
 
     if (myGen !== scanGen) return;
 
