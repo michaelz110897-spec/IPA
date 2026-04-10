@@ -11,7 +11,7 @@
 
 const STORAGE_KEY = "anthropicApiKey";
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
-const MODEL_ID = "claude-sonnet-4-6";
+const MODEL_ID = "claude-haiku-4-5-20251001";
 const MAX_TOKENS = 200;
 
 const PRICE_PROMPT = [

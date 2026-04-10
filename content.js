@@ -355,7 +355,7 @@
       labelEl.appendChild(makeSpan("pce-save", "save " + formatMoney(result.save)));
     }
     if (result.pct != null) {
-      labelEl.appendChild(makeSpan("pce-pct", "\u2212" + Math.round(result.pct) + "%"));
+      labelEl.appendChild(makeSpan("pce-pct", "\u2212" + result.pct.toFixed(2) + "%"));
     }
     requestAnimationFrame(() => { if (labelEl) labelEl.classList.add("pce-visible"); });
   }
